@@ -11,6 +11,7 @@ import sys
 import termios
 import time
 
+MAX_BUFFER = 1_000_000  # 1 MB
 
 def emit(kind, **payload):
     sys.stdout.write(json.dumps({"type": kind, **payload}, ensure_ascii=False) + "\n")
@@ -86,6 +87,9 @@ def main():
                     pass
                 break
             stdin_buffer += chunk
+            if len(stdin_buffer) > MAX_BUFFER:
+                emit("error", message="stdin buffer exceeded 1 MB limit")
+                break
             while b"\n" in stdin_buffer:
                 line, stdin_buffer = stdin_buffer.split(b"\n", 1)
                 if not line:

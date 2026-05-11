@@ -1,8 +1,8 @@
 import { createServer } from "node:http";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { existsSync, statSync } from "node:fs";
+import { readFile, readdir } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { WebSocketServer } from "ws";
 
@@ -72,12 +72,14 @@ function parseDeepSeekSessions(output) {
   return rows;
 }
 
-function findSessionFile(id) {
+async function findSessionFile(id) {
   if (!id || !existsSync(DEEPSEEK_SESSION_DIR)) return null;
   const safeId = String(id).replace(/[^0-9a-f-]/gi, "");
-  const match = readdirSync(DEEPSEEK_SESSION_DIR)
+  if (!safeId) return null;
+  const files = await readdir(DEEPSEEK_SESSION_DIR);
+  const match = files
     .filter((name) => name.endsWith(".json"))
-    .find((name) => name === `${safeId}.json` || name.startsWith(safeId));
+    .find((name) => name === `${safeId}.json`);
   return match ? join(DEEPSEEK_SESSION_DIR, match) : null;
 }
 
@@ -137,7 +139,7 @@ async function handleSessions(res) {
 
 async function handleSessionRead(url, res) {
   const id = url.searchParams.get("id");
-  const file = findSessionFile(id);
+  const file = await findSessionFile(id);
   if (!file) {
     sendJson(res, 404, { error: "Session not found." });
     return;
@@ -150,9 +152,16 @@ async function handleSessionRead(url, res) {
   }
 }
 
+const MAX_BODY = 64 * 1024; // 64 KB
+
 async function readJson(req) {
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > MAX_BODY) throw new Error("Request body too large");
+    chunks.push(chunk);
+  }
   if (!chunks.length) return {};
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
@@ -178,7 +187,7 @@ async function handleSessionAction(req, res) {
         sendJson(res, 400, { error: "Title is required." });
         return;
       }
-      await execFileAsync("deepseek", ["thread", "set-name", id, title], {
+      await execFileAsync(DEEPSEEK_TUI_BIN, ["thread", "set-name", id, title], {
         cwd: ROOT,
         timeout: 10000,
       });
@@ -186,7 +195,7 @@ async function handleSessionAction(req, res) {
       return;
     }
     if (action === "archive") {
-      await execFileAsync("deepseek", ["thread", "archive", id], {
+      await execFileAsync(DEEPSEEK_TUI_BIN, ["thread", "archive", id], {
         cwd: ROOT,
         timeout: 10000,
       });
@@ -204,7 +213,7 @@ async function handleSessionAction(req, res) {
 }
 
 async function runDeepSeek(args, timeout = 10000) {
-  const { stdout, stderr } = await execFileAsync("deepseek", args, {
+  const { stdout, stderr } = await execFileAsync(DEEPSEEK_TUI_BIN, args, {
     cwd: ROOT,
     timeout,
     maxBuffer: 1024 * 1024,
@@ -331,7 +340,19 @@ const server = createServer(async (req, res) => {
 
 const wss = new WebSocketServer({ noServer: true });
 
+const heartbeatInterval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
+wss.on("close", () => clearInterval(heartbeatInterval));
+
 function startTui(ws, requestUrl) {
+  ws.isAlive = true;
+  ws.on("pong", () => { ws.isAlive = true; });
   const workspace = resolveWorkspace(requestUrl.searchParams.get("workspace"));
   const cols = Number(requestUrl.searchParams.get("cols") || 120);
   const rows = Number(requestUrl.searchParams.get("rows") || 36);

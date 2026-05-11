@@ -768,13 +768,10 @@ h2 {
 
 .xterm {
   height: 100%;
-  font-family: var(--ui-font) !important;
   transform: translateY(calc(-1 * var(--output-crop-top)));
 }
 
-.xterm * {
-  font-family: var(--ui-font) !important;
-}
+/* .xterm * { font-family: var(--ui-font) !important; } — removed: xterm.js must keep monospace */
 
 .xterm-rows {
   font-weight: 450;
