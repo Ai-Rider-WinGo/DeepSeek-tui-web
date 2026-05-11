@@ -11,6 +11,7 @@ const PORT = Number(process.env.PORT || 8791);
 const ROOT = process.cwd();
 const PUBLIC_DIR = join(ROOT, "public");
 const DEEPSEEK_TUI_BIN = process.env.DEEPSEEK_TUI_BIN || "deepseek-tui";
+const DEEPSEEK_CLI_BIN = process.env.DEEPSEEK_CLI_BIN || "deepseek";
 const PYTHON_BIN = process.env.PYTHON_BIN || "python3";
 const TUI_BRIDGE = join(ROOT, "scripts", "tui_bridge.py");
 const DEEPSEEK_HOME = process.env.DEEPSEEK_HOME || join(process.env.HOME || "", ".deepseek");
@@ -187,7 +188,7 @@ async function handleSessionAction(req, res) {
         sendJson(res, 400, { error: "Title is required." });
         return;
       }
-      await execFileAsync(DEEPSEEK_TUI_BIN, ["thread", "set-name", id, title], {
+      await execFileAsync(DEEPSEEK_CLI_BIN, ["thread", "set-name", id, title], {
         cwd: ROOT,
         timeout: 10000,
       });
@@ -195,7 +196,7 @@ async function handleSessionAction(req, res) {
       return;
     }
     if (action === "archive") {
-      await execFileAsync(DEEPSEEK_TUI_BIN, ["thread", "archive", id], {
+      await execFileAsync(DEEPSEEK_CLI_BIN, ["thread", "archive", id], {
         cwd: ROOT,
         timeout: 10000,
       });
@@ -213,7 +214,7 @@ async function handleSessionAction(req, res) {
 }
 
 async function runDeepSeek(args, timeout = 10000) {
-  const { stdout, stderr } = await execFileAsync(DEEPSEEK_TUI_BIN, args, {
+  const { stdout, stderr } = await execFileAsync(DEEPSEEK_CLI_BIN, args, {
     cwd: ROOT,
     timeout,
     maxBuffer: 1024 * 1024,
