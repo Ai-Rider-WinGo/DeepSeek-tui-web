@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Deepseek-Tui-web</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <nav class="app-rail" aria-label="Primary">
+      <button class="rail-item active" type="button" data-section="chat" data-i18n-title="nav_chat" aria-label="对话"><svg viewBox="0 0 24 24"><path d="M5 6.5h14v9H9l-4 3v-12Z"/></svg></button>
+      <button class="rail-item" type="button" data-section="tasks" data-i18n-title="nav_tasks" aria-label="任务"><svg viewBox="0 0 24 24"><path d="M8 7h11M8 12h11M8 17h11M4.5 7l1 1 2-2M4.5 12l1 1 2-2M4.5 17l1 1 2-2"/></svg></button>
+      <button class="rail-item" type="button" data-section="skills" data-i18n-title="nav_skills" aria-label="技能"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3ZM18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8L18 15Z"/></svg></button>
+      <button class="rail-item" type="button" data-section="config" data-i18n-title="nav_config" aria-label="配置"><svg viewBox="0 0 24 24"><path d="M5 7h8M17 7h2M5 17h2M11 17h8M13 7a2 2 0 1 0 4 0 2 2 0 0 0-4 0ZM7 17a2 2 0 1 0 4 0 2 2 0 0 0-4 0Z"/></svg></button>
+      <button class="rail-item" type="button" data-section="stats" data-i18n-title="nav_stats" aria-label="统计"><svg viewBox="0 0 24 24"><path d="M5 19V5M5 19h14M9 16v-5M13 16V8M17 16v-8"/></svg></button>
+      <button class="rail-item" type="button" data-section="logs" data-i18n-title="nav_logs" aria-label="日志"><svg viewBox="0 0 24 24"><path d="M6 7h12M6 12h12M6 17h8"/></svg></button>
+      <button class="rail-item rail-settings" type="button" data-section="settings" data-i18n-title="nav_settings" aria-label="设置"><svg viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7ZM12 3v3M12 18v3M4.2 7.5l2.6 1.5M17.2 15l2.6 1.5M4.2 16.5 6.8 15M17.2 9l2.6-1.5"/></svg></button>
+    </nav>
+
+    <aside class="sidebar" aria-label="Sessions">
+      <div class="brand">
+        <div class="mark" id="brandLogo">DS</div>
+        <div class="brand-copy">
+          <h1>DeepSeek TUI</h1>
+          <p data-i18n="brand_subtitle">Web Console</p>
+        </div>
+      </div>
+
+      <div class="sidebar-actions">
+        <button id="newSession" class="primary" type="button" data-i18n="new_session">New Session</button>
+        <button id="refreshSessions" class="square" type="button" data-i18n-title="refresh_sessions" aria-label="Refresh sessions">↻</button>
+      </div>
+
+      <div class="session-search">
+        <input id="sessionSearch" type="search" data-i18n-placeholder="search_sessions" placeholder="Search sessions" spellcheck="false">
+      </div>
+
+      <nav id="sessionList" class="session-list" aria-label="Saved sessions"></nav>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div class="title-block">
+          <h2 id="sessionTitle">Live TUI</h2>
+          <p id="status">Connecting to local PTY...</p>
+        </div>
+        <div class="toolbar">
+          <div class="segmented" role="group" aria-label="Theme">
+            <button id="themeLight" type="button">Light</button>
+            <button id="themeDark" type="button">Dark</button>
+          </div>
+          <button id="reconnect" type="button" data-i18n="reconnect">Reconnect</button>
+        </div>
+      </header>
+
+      <section class="conversation-shell">
+        <section id="utilityPanel" class="utility-panel hidden" aria-live="polite"></section>
+        <section id="messageList" class="message-list" aria-label="Conversation messages"></section>
+        <section class="terminal-frame collapsed hidden" id="rawLogPanel">
+          <button class="terminal-meta" id="rawLogToggle" type="button">
+            <span data-i18n="raw_tui_log">Raw TUI debug log</span>
+            <span id="backendBadge">PTY</span>
+            <span id="workspaceBadge">Current workspace</span>
+          </button>
+          <div id="terminal" class="terminal" aria-label="DeepSeek TUI debug output"></div>
+        </section>
+      </section>
+
+      <form id="composerForm" class="composer">
+        <textarea id="composerInput" rows="3" data-i18n-placeholder="composer_placeholder" placeholder="给 DeepSeek 发消息..." spellcheck="false"></textarea>
+        <div class="composer-footer">
+          <div class="model-controls">
+            <label>
+              <span data-i18n="model">Model</span>
+              <select id="modelSelect">
+                <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+                <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+                <option value="deepseek-v3-2-chat">deepseek-v3.2-chat</option>
+                <option value="deepseek-v3-2-reasoner">deepseek-v3.2-reasoner</option>
+              </select>
+            </label>
+            <label>
+              <span data-i18n="reasoning">Reasoning</span>
+              <select id="reasoningSelect">
+                <option value="max">max</option>
+                <option value="high">high</option>
+                <option value="medium">medium</option>
+                <option value="low">low</option>
+              </select>
+            </label>
+          </div>
+          <button id="sendPrompt" class="primary" type="submit" data-i18n="send">Send</button>
+        </div>
+      </form>
+    </main>
+
+    <aside class="inspector" aria-label="Planning">
+      <section class="inspector-panel thinking-panel" id="thinkingPanel">
+        <button class="panel-head" type="button" data-toggle="thinkingPanel">
+          <span data-i18n="thinking">Thinking</span>
+          <strong id="thinkingState">idle</strong>
+        </button>
+        <div class="panel-body" id="thinkingBody">等待模型思考。</div>
+      </section>
+
+      <section class="inspector-panel open" id="planPanel">
+        <button class="panel-head" type="button" data-toggle="planPanel">
+          <span data-i18n="plan">Plan</span>
+          <strong id="planState">ready</strong>
+        </button>
+        <div class="panel-body">
+          <ol id="planList" class="plan-list">
+            <li>等待 TUI 输出计划。</li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="inspector-panel open" id="taskPanel">
+        <button class="panel-head" type="button" data-toggle="taskPanel">
+          <span data-i18n="tasks">Tasks</span>
+          <strong id="taskState">sync</strong>
+        </button>
+        <div class="panel-body">
+          <div id="taskList" class="task-list">
+            <div class="task-row">暂无独立任务。</div>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+    <div id="settingsDialog" class="settings-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <div class="settings-card">
+        <header class="settings-head">
+          <div>
+            <h2 id="settingsTitle" data-i18n="settings_title">Control Center</h2>
+            <p data-i18n="settings_subtitle">Preferences, appearance, and local DeepSeek controls.</p>
+          </div>
+          <button id="closeSettings" class="square" type="button" aria-label="Close">×</button>
+        </header>
+        <section class="settings-grid">
+          <label>
+            <span data-i18n="language">Language</span>
+            <select id="languageSelect">
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+          <label>
+            <span data-i18n="theme">Theme</span>
+            <select id="themeSelect">
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
+          </label>
+          <label>
+            <span data-i18n="default_model">Default model</span>
+            <select id="settingsModelSelect"></select>
+          </label>
+          <label>
+            <span data-i18n="raw_log">Raw log</span>
+            <select id="rawLogSelect">
+              <option value="collapsed">Collapsed</option>
+              <option value="open">Open</option>
+            </select>
+          </label>
+        </section>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+    <script src="app.js" type="module"></script>
+  </body>
+</html>

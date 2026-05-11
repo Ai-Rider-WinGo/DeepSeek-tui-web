@@ -1,0 +1,17 @@
+{
+  "name": "deepseek-tui-web",
+  "version": "0.3.4",
+  "private": true,
+  "description": "Local WebUI that brings DeepSeek TUI sessions, output, tasks, and settings into the browser.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ws": "^8.20.0"
+  }
+}
