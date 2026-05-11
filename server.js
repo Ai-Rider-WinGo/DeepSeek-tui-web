@@ -6,6 +6,11 @@ import { readFile, readdir } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { WebSocketServer } from "ws";
 
+// Bypass system proxy for DeepSeek API — required for TUI binary to start.
+// Set at process level so ALL child processes (execFile/spawn) inherit.
+process.env.NO_PROXY = process.env.NO_PROXY || "api.deepseek.com";
+process.env.DEEPSEEK_FORCE_HTTP1 = process.env.DEEPSEEK_FORCE_HTTP1 || "1";
+
 const HOST = process.env.HOST || "127.0.0.1";
 const PORT = Number(process.env.PORT || 8791);
 const ROOT = process.cwd();
@@ -387,8 +392,6 @@ function startTui(ws, requestUrl) {
       cwd: workspace,
       env: {
         ...process.env,
-        NO_PROXY: "api.deepseek.com",
-        DEEPSEEK_FORCE_HTTP1: "1",
         TERM: "xterm-256color",
         COLORTERM: "truecolor",
         COLUMNS: String(Math.max(40, Math.min(cols, 240))),
