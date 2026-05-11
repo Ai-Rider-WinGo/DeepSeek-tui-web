@@ -386,6 +386,8 @@ function startTui(ws, requestUrl) {
       cwd: workspace,
       env: {
         ...process.env,
+        NO_PROXY: "api.deepseek.com",
+        DEEPSEEK_FORCE_HTTP1: "1",
         TERM: "xterm-256color",
         COLORTERM: "truecolor",
         COLUMNS: String(Math.max(40, Math.min(cols, 240))),
