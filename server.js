@@ -85,7 +85,7 @@ async function findSessionFile(id) {
   const files = await readdir(DEEPSEEK_SESSION_DIR);
   const match = files
     .filter((name) => name.endsWith(".json"))
-    .find((name) => name === `${safeId}.json`);
+    .find((name) => name.startsWith(safeId));
   return match ? join(DEEPSEEK_SESSION_DIR, match) : null;
 }
 
