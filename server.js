@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
-import { execFile, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { WebSocketServer } from "ws";
@@ -17,6 +17,7 @@ const ROOT = process.cwd();
 const PUBLIC_DIR = join(ROOT, "public");
 const DEEPSEEK_TUI_BIN = process.env.DEEPSEEK_TUI_BIN || "deepseek-tui";
 const DEEPSEEK_CLI_BIN = process.env.DEEPSEEK_CLI_BIN || "deepseek";
+const TMUX_BIN = process.env.TMUX_BIN || "tmux";
 const PYTHON_BIN = process.env.PYTHON_BIN || "python3";
 const TUI_BRIDGE = join(ROOT, "scripts", "tui_bridge.py");
 const DEEPSEEK_HOME = process.env.DEEPSEEK_HOME || join(process.env.HOME || "", ".deepseek");
@@ -45,6 +46,43 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+function hasExecutable(bin) {
+  try {
+    execFileSync("sh", ["-lc", `command -v ${shellQuote(bin)}`], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function tmuxSessionName(id, resume, fresh) {
+  const seed = resume || (fresh ? id : "live");
+  return `dstw-${String(seed).replace(/[^0-9a-z-]/gi, "").slice(0, 18) || id.slice(0, 8)}`;
+}
+
+function runTmux(args, options = {}) {
+  return execFileSync(TMUX_BIN, args, {
+    cwd: options.cwd || ROOT,
+    env: { ...process.env, TERM: "xterm-256color" },
+    stdio: options.stdio || "ignore",
+  });
+}
+
+function ensureTmuxSession(name, workspace, command) {
+  try {
+    runTmux(["has-session", "-t", name], { cwd: workspace });
+  } catch {
+    runTmux(["new-session", "-d", "-s", name, "-c", workspace, command], { cwd: workspace });
+  }
+  runTmux(["set-option", "-t", name, "mouse", "on"], { cwd: workspace });
+  runTmux(["set-option", "-t", name, "history-limit", "50000"], { cwd: workspace });
+  runTmux(["set-option", "-t", name, "remain-on-exit", "off"], { cwd: workspace });
+}
+
 function resolveWorkspace(value) {
   const candidate = value && String(value).trim() ? resolve(String(value)) : ROOT;
   if (!existsSync(candidate) || !statSync(candidate).isDirectory()) return ROOT;
@@ -52,10 +90,12 @@ function resolveWorkspace(value) {
 }
 
 function handleHealth(res) {
+  const tmuxAvailable = hasExecutable(TMUX_BIN);
   sendJson(res, 200, {
     status: "ok",
-    backend: "python-pty",
+    backend: tmuxAvailable ? "python-pty+tmux" : "python-pty",
     deepseek_tui_bin: DEEPSEEK_TUI_BIN,
+    tmux_bin: tmuxAvailable ? TMUX_BIN : null,
     active_tuis: activeTuis.size,
     cwd: ROOT,
   });
@@ -369,15 +409,23 @@ function startTui(ws, requestUrl) {
     "--workspace",
     workspace,
     "--skip-onboarding",
+    "--no-alt-screen",
   ];
   if (resume && /^[0-9a-f]{4,}$/i.test(resume)) {
     tuiArgs.push("--resume", resume);
   } else if (fresh) {
     tuiArgs.push("--fresh");
   }
+  const tuiCommand = `${DEEPSEEK_TUI_BIN} ${tuiArgs.map(shellQuote).join(" ")}`;
+  const useTmux = hasExecutable(TMUX_BIN);
+  const tmuxName = tmuxSessionName(id, resume, fresh);
+  const bridgeCommand = useTmux
+    ? [TMUX_BIN, "-u", "attach-session", "-t", tmuxName]
+    : [DEEPSEEK_TUI_BIN, ...tuiArgs];
 
   let child;
   try {
+    if (useTmux) ensureTmuxSession(tmuxName, workspace, tuiCommand);
     child = spawn(PYTHON_BIN, [
       TUI_BRIDGE,
       "--workspace",
@@ -386,8 +434,7 @@ function startTui(ws, requestUrl) {
       String(Math.max(40, Math.min(cols, 240))),
       "--rows",
       String(Math.max(12, Math.min(rows, 80))),
-      DEEPSEEK_TUI_BIN,
-      ...tuiArgs,
+      ...bridgeCommand,
     ], {
       cwd: workspace,
       env: {
@@ -414,7 +461,10 @@ function startTui(ws, requestUrl) {
     type: "ready",
     id,
     workspace,
-    command: `${DEEPSEEK_TUI_BIN} ${tuiArgs.map((arg) => JSON.stringify(arg)).join(" ")}`,
+    command: useTmux
+      ? `${TMUX_BIN} -u attach-session -t ${tmuxName} (${tuiCommand})`
+      : `${DEEPSEEK_TUI_BIN} ${tuiArgs.map((arg) => JSON.stringify(arg)).join(" ")}`,
+    tmux: useTmux ? tmuxName : null,
     resume: resume || null,
     fresh,
   }));

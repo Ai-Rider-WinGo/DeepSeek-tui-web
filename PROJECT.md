@@ -12,7 +12,7 @@ Suggested repository name: `Deepseek-Tui-web`
 
 ## Version
 
-`0.3.4`
+`0.5.3`
 
 ## Purpose
 
@@ -27,6 +27,8 @@ tasks, skills, settings, stats, logs, and raw debug output.
 - `public/app.js` loads saved sessions, renders structured messages, syncs
   panels, and manages UI preferences.
 - `public/style.css` owns the current visual system.
+- The main middle area now defaults to structured conversation cards. The raw
+  terminal mirror is kept as a hidden debug view.
 
 ## Important Product Principle
 

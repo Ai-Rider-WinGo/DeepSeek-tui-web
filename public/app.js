@@ -37,22 +37,24 @@ const i18n = {
   zh: {
     nav_chat: "对话", nav_tasks: "任务", nav_skills: "技能", nav_config: "配置", nav_stats: "统计", nav_logs: "日志", nav_settings: "设置",
     brand_subtitle: "Web 控制台", new_session: "新对话", refresh_sessions: "刷新会话", search_sessions: "搜索会话",
-    reconnect: "重新连接", raw_tui_log: "原始 TUI 调试日志", composer_placeholder: "给 DeepSeek 发消息...",
-    model: "模型", reasoning: "推理强度", send: "发送", thinking: "思考", plan: "计划", tasks: "任务",
+    reconnect: "重新连接", raw_tui_log: "DeepSeek TUI 镜像", composer_placeholder: "给 DeepSeek 发消息...",
+    model: "模型", reasoning: "推理强度", send: "发送 ⌘ Enter", thinking: "思考", plan: "计划", tasks: "任务",
     settings_title: "控制中心", settings_subtitle: "偏好、外观和本机 DeepSeek 控制。", language: "语言", theme: "主题",
     default_model: "默认模型", raw_log: "原始日志", no_data: "暂无数据",
     you: "你", deepseek: "DeepSeek", tool_result: "工具结果", section_chat: "对话", section_tasks: "任务", section_skills: "技能",
     section_config: "配置", section_stats: "统计", section_logs: "日志", empty_chat: "当前会话暂无可展示的文本内容。发送一条消息后会在这里同步 DeepSeek TUI 输出。",
+    thinking_process: "思考过程", thinking_streaming: "正在思考",
   },
   en: {
     nav_chat: "Chat", nav_tasks: "Tasks", nav_skills: "Skills", nav_config: "Config", nav_stats: "Stats", nav_logs: "Logs", nav_settings: "Settings",
     brand_subtitle: "Web Console", new_session: "New Session", refresh_sessions: "Refresh sessions", search_sessions: "Search sessions",
-    reconnect: "Reconnect", raw_tui_log: "Raw TUI debug log", composer_placeholder: "Message DeepSeek...",
-    model: "Model", reasoning: "Reasoning", send: "Send", thinking: "Thinking", plan: "Plan", tasks: "Tasks",
+    reconnect: "Reconnect", raw_tui_log: "DeepSeek TUI Mirror", composer_placeholder: "Message DeepSeek...",
+    model: "Model", reasoning: "Reasoning", send: "Send ⌘ Enter", thinking: "Thinking", plan: "Plan", tasks: "Tasks",
     settings_title: "Control Center", settings_subtitle: "Preferences, appearance, and local DeepSeek controls.", language: "Language", theme: "Theme",
     default_model: "Default model", raw_log: "Raw log", no_data: "No data",
     you: "You", deepseek: "DeepSeek", tool_result: "Tool result", section_chat: "Chat", section_tasks: "Tasks", section_skills: "Skills",
     section_config: "Config", section_stats: "Stats", section_logs: "Logs", empty_chat: "No displayable text in this session yet. Send a message and DeepSeek TUI output will sync here.",
+    thinking_process: "Thinking process", thinking_streaming: "Thinking",
   },
 };
 
@@ -105,15 +107,38 @@ const themes = {
   },
 };
 
+const terminalTheme = {
+  background: "#07111f",
+  foreground: "#d8e2ef",
+  cursor: "#5eead4",
+  selectionBackground: "#153d49",
+  black: "#07111f",
+  red: "#ff6b7a",
+  green: "#5eead4",
+  yellow: "#f7d774",
+  blue: "#7ab7ff",
+  magenta: "#d7a1ff",
+  cyan: "#67e8f9",
+  white: "#d8e2ef",
+  brightBlack: "#617086",
+  brightRed: "#ff9aa5",
+  brightGreen: "#9ff8df",
+  brightYellow: "#ffe59b",
+  brightBlue: "#a8ceff",
+  brightMagenta: "#e7c3ff",
+  brightCyan: "#a5f3fc",
+  brightWhite: "#ffffff",
+};
+
 const term = new Terminal({
   cursorBlink: false,
   convertEol: false,
   disableStdin: true,
-  fontFamily: '"Inter", "SF Pro Text", "PingFang SC", "Microsoft YaHei UI", ui-sans-serif, system-ui, sans-serif',
-  fontSize: 14,
-  lineHeight: 1.34,
-  scrollback: 5000,
-  theme: themes.dark,
+  fontFamily: '"SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "PingFang SC", monospace',
+  fontSize: 13.5,
+  lineHeight: 1.28,
+  scrollback: 30000,
+  theme: terminalTheme,
 });
 
 const FitAddonConstructor = (typeof FitAddon !== 'undefined' && FitAddon.FitAddon) || FitAddon;
@@ -135,6 +160,8 @@ let currentLang = localStorage.getItem("deepseek-webui-lang") || "zh";
 let pinnedSessions = readPinnedSessions();
 let hiddenSessions = readHiddenSessions();
 let renamedSessions = readRenamedSessions();
+let liveThinkingArticle = null;
+let liveThinkingContent = null;
 
 const sessionActions = [
   { id: "rename", label: "重命名对话", run: renameSession },
@@ -203,7 +230,7 @@ function applyTheme(themeName) {
   currentTheme = themeName === "light" ? "light" : "dark";
   document.documentElement.dataset.theme = currentTheme;
   localStorage.setItem("deepseek-webui-theme", currentTheme);
-  term.options.theme = themes[currentTheme];
+  term.options.theme = terminalTheme;
   themeLightButton.classList.toggle("active", currentTheme === "light");
   themeDarkButton.classList.toggle("active", currentTheme === "dark");
   themeSelect.value = currentTheme;
@@ -267,10 +294,16 @@ function socketUrl() {
 function send(message) {
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(message));
+    return true;
   }
+  return false;
 }
 
 function fitAndResize() {
+  if (rawLogPanel.classList.contains("hidden") || terminalHost.offsetWidth === 0 || terminalHost.offsetHeight === 0) {
+    send({ type: "resize", cols: term.cols || 120, rows: term.rows || 36 });
+    return;
+  }
   fitAddon.fit();
   send({ type: "resize", cols: term.cols, rows: term.rows });
 }
@@ -279,7 +312,9 @@ function connect() {
   if (socket) socket.close();
   term.reset();
   term.writeln("\x1b[32mConnecting to DeepSeek TUI...\x1b[0m");
-  fitAddon.fit();
+  if (!rawLogPanel.classList.contains("hidden") && terminalHost.offsetWidth > 0 && terminalHost.offsetHeight > 0) {
+    fitAddon.fit();
+  }
   sessionTitle.textContent = selectedSessionTitle;
   socket = new WebSocket(socketUrl());
   freshNext = false;
@@ -298,8 +333,10 @@ function connect() {
       return;
     }
     if (message.type === "ready") {
-      setStatus(message.resume ? `Resumed ${message.resume}` : "Running fresh TUI");
+      const mode = message.tmux ? `tmux ${message.tmux}` : "direct PTY";
+      setStatus(`${message.resume ? `Resumed ${message.resume}` : "Running fresh TUI"} · ${mode}`);
       workspaceBadge.textContent = message.workspace || "Current workspace";
+      backendBadge.textContent = message.tmux ? "tmux-backed PTY" : "direct PTY";
     }
     if (message.type === "output") {
       term.write(message.data);
@@ -348,27 +385,79 @@ function visibleTextBlocks(message) {
   });
 }
 
+function visibleThinkingBlocks(message) {
+  return (message.content || []).filter((block) => {
+    return block.type === "thinking" && Boolean((block.text || "").trim());
+  });
+}
+
+function createAssistantRoleLabel() {
+  const label = document.createElement("div");
+  label.className = "message-role";
+  label.innerHTML = `<span class="role-dot"></span><span>${t("deepseek")}</span>`;
+  return label;
+}
+
+function renderThinkingDetails(blocks, { open = false, streaming = false } = {}) {
+  const details = document.createElement("details");
+  details.className = "thinking-details";
+  details.open = open;
+  const summary = document.createElement("summary");
+  summary.innerHTML = `<span>${streaming ? t("thinking_streaming") : t("thinking_process")}</span><strong>${open ? "open" : "folded"}</strong>`;
+  const content = document.createElement("div");
+  content.className = "thinking-content";
+  content.textContent = blocks.map((block) => block.text || "").filter(Boolean).join("\n\n");
+  details.append(summary, content);
+  return details;
+}
+
+function ensureLiveThinkingCard() {
+  if (liveThinkingArticle && messageList.contains(liveThinkingArticle)) return liveThinkingContent;
+  liveThinkingArticle = document.createElement("article");
+  liveThinkingArticle.className = "message-card assistant-message live-thinking";
+  liveThinkingArticle.append(createAssistantRoleLabel());
+  const details = renderThinkingDetails([{ text: "" }], { open: true, streaming: true });
+  liveThinkingContent = details.querySelector(".thinking-content");
+  liveThinkingArticle.append(details);
+  messageList.append(liveThinkingArticle);
+  return liveThinkingContent;
+}
+
+function showLiveThinking(text) {
+  const content = ensureLiveThinkingCard();
+  content.textContent = text;
+  messageList.scrollTop = messageList.scrollHeight;
+}
+
+function clearLiveThinkingCard() {
+  liveThinkingArticle = null;
+  liveThinkingContent = null;
+}
+
 function renderStructuredSession(session) {
   currentSession = session;
   messageList.innerHTML = "";
+  clearLiveThinkingCard();
   const messages = session.messages || [];
   let visibleCount = 0;
   for (const message of messages) {
+    const isAssistant = message.role === "assistant";
     const visibleBlocks = visibleTextBlocks(message);
-    if (!visibleBlocks.length) continue;
+    const thinkingBlocks = visibleThinkingBlocks(message);
+    if (!visibleBlocks.length && !(isAssistant && thinkingBlocks.length)) continue;
     visibleCount += 1;
     const article = document.createElement("article");
     article.className = `message-card ${message.role === "user" ? "user-message" : "assistant-message"}`;
-    const body = document.createElement("div");
-    body.className = "message-body";
-    body.append(renderContentBlocks(visibleBlocks));
-    if (message.role === "assistant") {
-      const label = document.createElement("div");
-      label.className = "message-role";
-      label.innerHTML = `<span class="role-dot"></span><span>${t("deepseek")}</span>`;
-      article.append(label);
+    if (isAssistant) article.append(createAssistantRoleLabel());
+    if (visibleBlocks.length) {
+      const body = document.createElement("div");
+      body.className = "message-body";
+      body.append(renderContentBlocks(visibleBlocks));
+      article.append(body);
     }
-    article.append(body);
+    if (isAssistant && thinkingBlocks.length) {
+      article.append(renderThinkingDetails(thinkingBlocks, { open: false }));
+    }
     messageList.append(article);
   }
   if (!visibleCount) {
@@ -468,6 +557,7 @@ async function loadSession(id) {
 async function loadUtilitySection(section) {
   if (section === "chat") {
     utilityPanel.classList.add("hidden");
+    rawLogPanel.classList.add("hidden");
     messageList.classList.remove("hidden");
     return;
   }
@@ -477,6 +567,7 @@ async function loadUtilitySection(section) {
   }
   utilityPanel.classList.remove("hidden");
   messageList.classList.add("hidden");
+  rawLogPanel.classList.add("hidden");
   const title = t(`section_${section}`);
   utilityPanel.innerHTML = `<header><h2>${title}</h2><button id="utilityRefresh" type="button">${t("refresh_sessions")}</button></header><div class="utility-content">${t("no_data")}</div>`;
   document.querySelector("#utilityRefresh").addEventListener("click", () => loadUtilitySection(section));
@@ -509,7 +600,7 @@ function openSettings() {
   settingsDialog.classList.remove("hidden");
   languageSelect.value = currentLang;
   themeSelect.value = currentTheme;
-  rawLogSelect.value = rawLogPanel.classList.contains("hidden") ? "collapsed" : "open";
+  rawLogSelect.value = "open";
 }
 
 function closeSettingsDialog() {
@@ -649,12 +740,13 @@ async function loadSessions() {
     const res = await fetch("/api/sessions");
     const data = await res.json();
     sessions = data.sessions || [];
-    const current = sessions.find((item) => item.current && !hiddenSessions.has(item.id));
-    if (!selectedSessionId && current) {
+    const current = sessions.find((item) => item.current);
+    if (current) hiddenSessions.delete(current.id);
+    if ((!selectedSessionId || !sessions.some((item) => item.id === selectedSessionId)) && current) {
       selectedSessionId = current.id;
       selectedSessionTitle = getSessionTitle(current);
       sessionTitle.textContent = selectedSessionTitle;
-      loadSession(current.id);
+      await loadSession(current.id);
     }
     renderSessions();
   } catch {
@@ -668,8 +760,8 @@ function refreshAfterPrompt(attempt = 0) {
   sessionRefreshTimer = setTimeout(async () => {
     await loadSessions();
     if (selectedSessionId) await loadSession(selectedSessionId);
-    if (attempt < 4) refreshAfterPrompt(attempt + 1);
-  }, attempt === 0 ? 1400 : 2400);
+    if (attempt < 8) refreshAfterPrompt(attempt + 1);
+  }, [500, 900, 1400, 2200, 3200, 4600, 6500, 8500, 11000][attempt] || 12000);
 }
 
 async function loadHealth() {
@@ -686,15 +778,23 @@ async function loadHealth() {
 function sendPrompt(prompt) {
   const text = prompt.trim();
   if (!text) return;
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    setStatus("Disconnected - reconnect before sending");
+    return;
+  }
   thinkingPanel.classList.add("open");
   thinkingState.textContent = "waiting";
   thinkingBody.textContent = "等待 DeepSeek 开始流式思考。";
-  send({ type: "input", data: text + "\r" });
+  send({ type: "input", data: text });
+  setTimeout(() => {
+    send({ type: "input", data: "\r" });
+  }, 650);
   const optimistic = {
     metadata: currentSession?.metadata || {},
     messages: [
       ...(currentSession?.messages || []),
       { role: "user", content: [{ type: "text", text }] },
+      { role: "assistant", content: [{ type: "thinking", text: currentLang === "zh" ? "等待 DeepSeek 写入最终回答..." : "Waiting for DeepSeek to write the final answer..." }] },
     ],
   };
   renderStructuredSession(optimistic);
@@ -735,7 +835,7 @@ composerForm.addEventListener("submit", (event) => {
 });
 
 composerInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey) {
+  if (event.key === "Enter" && event.metaKey) {
     event.preventDefault();
     composerForm.requestSubmit();
   }
@@ -766,7 +866,12 @@ refreshSessionsButton.addEventListener("click", loadSessions);
 sessionSearch.addEventListener("input", renderSessions);
 themeLightButton.addEventListener("click", () => applyTheme("light"));
 themeDarkButton.addEventListener("click", () => applyTheme("dark"));
-rawLogToggle.addEventListener("click", () => rawLogPanel.classList.toggle("hidden"));
+rawLogToggle.addEventListener("click", () => {
+  messageList.classList.add("hidden");
+  utilityPanel.classList.add("hidden");
+  rawLogPanel.classList.remove("hidden");
+  setTimeout(fitAndResize, 0);
+});
 closeSettings.addEventListener("click", closeSettingsDialog);
 settingsDialog.addEventListener("click", (event) => { if (event.target === settingsDialog) closeSettingsDialog(); });
 languageSelect.addEventListener("change", () => {
@@ -777,7 +882,17 @@ languageSelect.addEventListener("change", () => {
   if (currentSession) renderStructuredSession(currentSession);
 });
 themeSelect.addEventListener("change", () => applyTheme(themeSelect.value));
-rawLogSelect.addEventListener("change", () => rawLogPanel.classList.toggle("hidden", rawLogSelect.value === "collapsed"));
+rawLogSelect.addEventListener("change", () => {
+  if (rawLogSelect.value === "open") {
+    messageList.classList.add("hidden");
+    utilityPanel.classList.add("hidden");
+    rawLogPanel.classList.remove("hidden");
+    setTimeout(fitAndResize, 0);
+  } else {
+    rawLogPanel.classList.add("hidden");
+    messageList.classList.remove("hidden");
+  }
+});
 
 applyTheme(currentTheme);
 applyI18n();

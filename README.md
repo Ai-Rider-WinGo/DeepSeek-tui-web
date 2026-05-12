@@ -1,6 +1,6 @@
 # Deepseek-Tui-web
 
-Version: **0.3.4**
+Version: **0.5.3**
 
 Deepseek-Tui-web is a local browser interface for the installed `deepseek-tui`.
 The project keeps the real TUI process running locally, then layers a structured
@@ -19,8 +19,9 @@ bring the TUI into a browser-native workbench:
 
 ## Current Status
 
-This is an active prototype. Version `0.3.4` focuses on the transition from a
-raw xterm-only wrapper to a structured WebUI.
+This is an active prototype. Version `0.5.3` focuses on replacing the raw
+terminal-centered middle area with a structured conversation surface while
+keeping the real DeepSeek TUI running behind the scenes.
 
 Working:
 
@@ -35,11 +36,12 @@ Working:
 - light/dark themes;
 - Orbit logo identity;
 - raw TUI debug panel kept available but hidden by default.
+- middle output defaults to structured session messages, not the xterm mirror;
+- fresh-session replies are synchronized back from the DeepSeek session API.
 
 Known issues:
 
-- the structured WebUI still depends on session-file refresh timing after user
-  input;
+- the structured WebUI still depends on polling session files after user input;
 - some DeepSeek internal messages are tool-only and should remain outside the
   main conversation stream;
 - the main output visual language is still being refined;
@@ -128,6 +130,6 @@ Mid-term:
 
 ## Version
 
-Current version: **0.3.4**
+Current version: **0.5.3**
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes.

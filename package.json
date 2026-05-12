@@ -1,6 +1,6 @@
 {
   "name": "deepseek-tui-web",
-  "version": "0.3.4",
+  "version": "0.5.3",
   "private": true,
   "description": "Local WebUI that brings DeepSeek TUI sessions, output, tasks, and settings into the browser.",
   "type": "module",
@@ -12,8 +12,8 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@xterm/addon-fit": "^0.10.0",
-    "@xterm/xterm": "^5.5.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "ws": "^8.20.0"
   }
 }
