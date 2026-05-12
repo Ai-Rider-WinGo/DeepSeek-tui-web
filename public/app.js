@@ -116,7 +116,8 @@ const term = new Terminal({
   theme: themes.dark,
 });
 
-const fitAddon = new FitAddon.FitAddon();
+const FitAddonConstructor = (typeof FitAddon !== 'undefined' && FitAddon.FitAddon) || FitAddon;
+const fitAddon = new FitAddonConstructor();
 term.loadAddon(fitAddon);
 term.open(terminalHost);
 
