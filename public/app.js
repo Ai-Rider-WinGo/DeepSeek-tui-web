@@ -17,6 +17,7 @@ const themeLightButton = document.querySelector("#themeLight");
 const themeDarkButton = document.querySelector("#themeDark");
 const composerForm = document.querySelector("#composerForm");
 const composerInput = document.querySelector("#composerInput");
+const sendPromptButton = document.querySelector("#sendPrompt");
 const modelSelect = document.querySelector("#modelSelect");
 const reasoningSelect = document.querySelector("#reasoningSelect");
 const thinkingPanel = document.querySelector("#thinkingPanel");
@@ -167,6 +168,7 @@ let liveAssistantBody = null;
 let liveOutputBuffer = "";
 let liveSawPromptEcho = false;
 let pendingPromptText = "";
+let pendingTurnId = "";
 let previousConversationText = "";
 
 const sessionActions = [
@@ -212,6 +214,14 @@ function stripAnsi(value) {
 
 function setStatus(text) {
   statusEl.textContent = text;
+}
+
+function setComposerBusy(isBusy) {
+  composerInput.disabled = isBusy;
+  sendPromptButton.disabled = isBusy;
+  sendPromptButton.textContent = isBusy
+    ? (currentLang === "zh" ? "运行中..." : "Running...")
+    : t("send");
 }
 
 function t(key) {
@@ -359,10 +369,12 @@ function connect() {
 
   socket.addEventListener("close", () => {
     setStatus("Disconnected");
+    if (pendingPromptText) setComposerBusy(false);
   });
 
   socket.addEventListener("error", () => {
     setStatus("Connection error");
+    if (pendingPromptText) setComposerBusy(false);
   });
 }
 
@@ -456,7 +468,7 @@ function ensureLiveAssistantCard() {
   liveAssistantArticle = document.createElement("article");
   liveAssistantArticle.className = "message-card assistant-message live-answer";
   liveAssistantArticle.append(createAssistantRoleLabel());
-  liveAssistantBody = createMessageBody(currentLang === "zh" ? "正在等待 DeepSeek 响应..." : "Waiting for DeepSeek...");
+  liveAssistantBody = createMessageBody(currentLang === "zh" ? "已发送，等待 DeepSeek 开始响应..." : "Sent. Waiting for DeepSeek...");
   liveAssistantArticle.append(liveAssistantBody);
   messageList.append(liveAssistantArticle);
   messageList.scrollTop = messageList.scrollHeight;
@@ -554,7 +566,7 @@ function inspectTuiOutput(raw) {
   }
   if (/thinking/i.test(text) || /思考|推理/.test(text)) {
     thinkingPanel.classList.add("open");
-    thinkingState.textContent = "streaming";
+    thinkingState.textContent = "running";
     thinkingBody.textContent = text.slice(-900);
     clearTimeout(thinkingTimer);
     thinkingTimer = setTimeout(() => {
@@ -595,10 +607,11 @@ function appendLiveOutput(text) {
   if (!liveSawPromptEcho) {
     const promptIndex = chunk.lastIndexOf(prompt);
     if (promptIndex === -1) {
-      showLiveAssistant(currentLang === "zh" ? "DeepSeek 正在输出..." : "DeepSeek is responding...");
+      showLiveAssistant(currentLang === "zh" ? "DeepSeek 正在处理，本次请求已发送..." : "DeepSeek is working on this request...");
       return;
     }
     liveSawPromptEcho = true;
+    thinkingState.textContent = "running";
     chunk = chunk.slice(promptIndex + prompt.length);
   } else {
     const promptIndex = chunk.lastIndexOf(prompt);
@@ -690,6 +703,10 @@ async function loadSession(id) {
       if (!sessionContainsPrompt(data, pendingPromptText)) return;
       if (!sessionHasAssistantAnswerAfterPrompt(data, pendingPromptText)) return;
       pendingPromptText = "";
+      pendingTurnId = "";
+      setComposerBusy(false);
+      thinkingState.textContent = "done";
+      setStatus("Answer synced from DeepSeek session");
     }
     renderStructuredSession(data);
   } catch {
@@ -947,37 +964,50 @@ async function loadHealth() {
 function sendPrompt(prompt) {
   const text = prompt.trim();
   if (!text) return;
+  if (pendingPromptText) return;
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     setStatus("Disconnected - reconnect before sending");
     return;
   }
+  pendingTurnId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   thinkingPanel.classList.add("open");
-  thinkingState.textContent = "waiting";
-  thinkingBody.textContent = "等待 DeepSeek 开始流式思考。";
+  thinkingState.textContent = "sending";
+  thinkingBody.textContent = "正在发送到本机 DeepSeek TUI。";
   pendingPromptText = text;
   previousConversationText = `${sessionPlainText(currentSession)}\n${messageList.innerText || ""}`;
   liveOutputBuffer = "";
   liveSawPromptEcho = false;
+  setComposerBusy(true);
+  setStatus("Sending prompt to DeepSeek TUI...");
   messageList.classList.remove("hidden");
   utilityPanel.classList.add("hidden");
   rawLogPanel.classList.add("hidden");
-  send({ type: "input", data: text });
+  // Clear any stale text left in the underlying TUI composer before typing.
+  // Without this, prompts can be concatenated and the final answer no longer
+  // corresponds to the user's visible message.
+  send({ type: "input", data: "\x15" });
+  setTimeout(() => {
+    send({ type: "input", data: text });
+    thinkingState.textContent = "running";
+    thinkingBody.textContent = "DeepSeek TUI 已收到输入，等待模型流式输出。";
+    showLiveAssistant(currentLang === "zh" ? "DeepSeek 正在处理本次问题..." : "DeepSeek is working on this question...");
+  }, 90);
   setTimeout(() => {
     send({ type: "input", data: "\r" });
-  }, 650);
+  }, 750);
   const optimistic = {
     metadata: currentSession?.metadata || {},
     messages: [
       ...(currentSession?.messages || []),
       { role: "user", content: [{ type: "text", text }] },
-      { role: "assistant", content: [{ type: "thinking", text: currentLang === "zh" ? "等待 DeepSeek 写入最终回答..." : "Waiting for DeepSeek to write the final answer..." }] },
+      { role: "assistant", content: [{ type: "thinking", text: currentLang === "zh" ? "本次请求正在运行，等待 DeepSeek 写入最终回答..." : "This request is running; waiting for DeepSeek to write the final answer..." }] },
     ],
   };
   renderStructuredSession(optimistic);
   ensureLiveAssistantCard();
   thinkingPanel.classList.add("open");
-  thinkingState.textContent = "waiting";
-  thinkingBody.textContent = "等待 DeepSeek 开始流式思考。";
+  thinkingState.textContent = "sending";
+  thinkingBody.textContent = "正在发送到本机 DeepSeek TUI。";
   refreshAfterPrompt();
 }
 

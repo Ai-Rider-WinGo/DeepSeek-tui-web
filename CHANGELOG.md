@@ -6,6 +6,11 @@
 
 - Composer submissions now render the user's message immediately before the PTY
   session file has finished writing.
+- Composer submissions now clear the underlying DeepSeek TUI draft line before
+  typing, preventing older prompts from being concatenated with the new one.
+- The composer is disabled while a prompt is in flight and the UI exposes
+  `sending` / `running` / `done` state instead of looking idle during model
+  work.
 - Added a temporary live assistant card fed by WebSocket PTY output, then
   replace it with the persisted DeepSeek session answer once the final text is
   available.
@@ -22,6 +27,9 @@
 - Browser automation on `http://127.0.0.1:8791/`: new session prompt appears
   within 300ms, live answer card appears while waiting, and the persisted final
   `ok` answer replaces the temporary card without page refresh.
+- Browser automation on `http://127.0.0.1:8791/`: prompt `请只回复 当前问题-*`
+  shows `running` state immediately and final answer matches only the current
+  prompt, with no older validation prompts mixed in.
 
 ### Changed
 
