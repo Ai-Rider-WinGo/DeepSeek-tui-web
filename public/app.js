@@ -162,6 +162,12 @@ let hiddenSessions = readHiddenSessions();
 let renamedSessions = readRenamedSessions();
 let liveThinkingArticle = null;
 let liveThinkingContent = null;
+let liveAssistantArticle = null;
+let liveAssistantBody = null;
+let liveOutputBuffer = "";
+let liveSawPromptEcho = false;
+let pendingPromptText = "";
+let previousConversationText = "";
 
 const sessionActions = [
   { id: "rename", label: "重命名对话", run: renameSession },
@@ -195,9 +201,10 @@ function writeRenamedSessions() {
 
 function stripAnsi(value) {
   return String(value)
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
     .replace(/\x1b[()][A-Za-z0-9]/g, "")
-    .replace(/\x1b[=>]/g, "")
+    .replace(/\x1b[=><#]/g, "")
     .replace(/\r/g, "\n")
     .replace(/[^\S\n]+/g, " ")
     .trim();
@@ -434,10 +441,47 @@ function clearLiveThinkingCard() {
   liveThinkingContent = null;
 }
 
+function createMessageBody(markdown) {
+  const body = document.createElement("div");
+  body.className = "message-body";
+  const block = document.createElement("div");
+  block.className = "text-block";
+  block.innerHTML = renderMarkdown(markdown || "");
+  body.append(block);
+  return body;
+}
+
+function ensureLiveAssistantCard() {
+  if (liveAssistantArticle && messageList.contains(liveAssistantArticle)) return liveAssistantBody;
+  liveAssistantArticle = document.createElement("article");
+  liveAssistantArticle.className = "message-card assistant-message live-answer";
+  liveAssistantArticle.append(createAssistantRoleLabel());
+  liveAssistantBody = createMessageBody(currentLang === "zh" ? "正在等待 DeepSeek 响应..." : "Waiting for DeepSeek...");
+  liveAssistantArticle.append(liveAssistantBody);
+  messageList.append(liveAssistantArticle);
+  messageList.scrollTop = messageList.scrollHeight;
+  return liveAssistantBody;
+}
+
+function showLiveAssistant(text) {
+  const body = ensureLiveAssistantCard();
+  const block = body.querySelector(".text-block");
+  block.innerHTML = renderMarkdown(text || (currentLang === "zh" ? "正在接收 DeepSeek 输出..." : "Receiving DeepSeek output..."));
+  messageList.scrollTop = messageList.scrollHeight;
+}
+
+function clearLiveAssistantCard() {
+  liveAssistantArticle = null;
+  liveAssistantBody = null;
+  liveOutputBuffer = "";
+  liveSawPromptEcho = false;
+}
+
 function renderStructuredSession(session) {
   currentSession = session;
   messageList.innerHTML = "";
   clearLiveThinkingCard();
+  clearLiveAssistantCard();
   const messages = session.messages || [];
   let visibleCount = 0;
   for (const message of messages) {
@@ -505,6 +549,9 @@ function renderInspectorFromSession(session) {
 function inspectTuiOutput(raw) {
   const text = stripAnsi(raw);
   if (!text) return;
+  if (pendingPromptText) {
+    appendLiveOutput(text);
+  }
   if (/thinking/i.test(text) || /思考|推理/.test(text)) {
     thinkingPanel.classList.add("open");
     thinkingState.textContent = "streaming";
@@ -542,16 +589,138 @@ function inspectTuiOutput(raw) {
   }
 }
 
+function appendLiveOutput(text) {
+  let chunk = text;
+  const prompt = pendingPromptText;
+  if (!liveSawPromptEcho) {
+    const promptIndex = chunk.lastIndexOf(prompt);
+    if (promptIndex === -1) {
+      showLiveAssistant(currentLang === "zh" ? "DeepSeek 正在输出..." : "DeepSeek is responding...");
+      return;
+    }
+    liveSawPromptEcho = true;
+    chunk = chunk.slice(promptIndex + prompt.length);
+  } else {
+    const promptIndex = chunk.lastIndexOf(prompt);
+    if (promptIndex !== -1) chunk = chunk.slice(promptIndex + prompt.length);
+  }
+  liveOutputBuffer = `${liveOutputBuffer}\n${chunk}`.slice(-8000);
+  const liveText = extractLiveAnswer(liveOutputBuffer);
+  showLiveAssistant(liveText);
+}
+
+function extractLiveAnswer(text) {
+  const lines = String(text)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.replace(/[┌┐└┘├┤┬┴┼│┃║╭╮╰╯─━═]+/g, " ").replace(/\s+/g, " ").trim())
+    .map((line) => line.replace(/^[●▪■▸▶┃│|>\s-]+/, "").trim())
+    .filter(Boolean);
+  const filtered = lines.filter((line) => {
+    if (isPromptEcho(line)) return false;
+    if (isPreviousConversationLine(line)) return false;
+    if (isStatusOrChromeLine(line)) return false;
+    if (isInternalReasoningLine(line)) return false;
+    if (isKnownHistoryLine(line)) return false;
+    if (/^thinking\s*(done|running)?/i.test(line)) return false;
+    if (/^\d+%|^[▰▱]+$/.test(line)) return false;
+    if (/^\|?\s*(服务|端口|状态)\s*\|/i.test(line)) return false;
+    return /[\u4e00-\u9fff]/.test(line) || /^(ok|好的|可以)[.!。！]?$/i.test(line) || /[.!?。！？]$/.test(line);
+  });
+  const tail = filtered.slice(-8).join("\n");
+  return tail || (currentLang === "zh" ? "DeepSeek 正在输出..." : "DeepSeek is responding...");
+}
+
+function compactText(value) {
+  return String(value || "").replace(/\s+/g, "");
+}
+
+function isPromptEcho(line) {
+  if (!pendingPromptText) return false;
+  const a = compactText(line);
+  const b = compactText(pendingPromptText);
+  if (!a || !b) return false;
+  if (a.includes(b) || b.includes(a)) return true;
+  const promptHead = b.slice(0, Math.min(12, Math.max(6, b.length)));
+  const promptTail = b.slice(Math.max(0, b.length - Math.min(12, Math.max(6, b.length))));
+  return Boolean((promptHead && a.includes(promptHead)) || (promptTail && a.includes(promptTail)));
+}
+
+function isPreviousConversationLine(line) {
+  const a = compactText(line);
+  const b = compactText(previousConversationText);
+  if (!a || a.length < 8 || !b) return false;
+  if (b.includes(a)) return true;
+  return b.includes(a.slice(0, 18)) || b.includes(a.slice(-18));
+}
+
+function isStatusOrChromeLine(line) {
+  return /thinking collapsed|press Ctrl\+O|Currentstate|mockHermesAgent|Composer|Live TUI|Resumed session|Session context synced/i.test(line)
+    || /^(Draft|Agent\s|DeepSeek\s*TUI|Web 控制台|New Session|Live|编写任务|使用 \/)/i.test(line)
+    || /🐳|⌒|▎|·\s*(draft|live|idle|ready|updated|done)\b/i.test(line);
+}
+
+function isInternalReasoningLine(line) {
+  const compact = compactText(line).toLowerCase();
+  return /The user is asking|Let me|I should|probably meant|They'?re|simple acknowledgment|meaningful status update|verification purposes|I'll respond|I will respond|simple test|simple request|reasoning/i.test(line)
+    || /theuserisasking|letme|ishould|probablymeant|simpleacknowledgment|meaningfulstatusupdate|verificationpurposes|illrespond|iwillrespond|thisisasimpletest|thisisaverysimplerequest|simplerequest|justrespond|reasoning/.test(compact)
+    || /用户.*(问|请求|想要)|我应该|让我|看起来像/i.test(line);
+}
+
+function isKnownHistoryLine(line) {
+  return /文件操作|Shell 命令|代码工作|Git 操作|飞书集成|子任务并行处理|Web 搜索|持久化任务|工作空间：当前绑定|需要我做什么|你想继续往哪个方向推进/i.test(line);
+}
+
+function sessionPlainText(session) {
+  return (session?.messages || [])
+    .flatMap((message) => message.content || [])
+    .map((block) => block.text || block.content || "")
+    .filter(Boolean)
+    .join("\n");
+}
+
 async function loadSession(id) {
   if (!id) return;
   try {
     const res = await fetch(`/api/session?id=${encodeURIComponent(id)}`);
     if (!res.ok) return;
     const data = await res.json();
+    if (pendingPromptText) {
+      if (!sessionContainsPrompt(data, pendingPromptText)) return;
+      if (!sessionHasAssistantAnswerAfterPrompt(data, pendingPromptText)) return;
+      pendingPromptText = "";
+    }
     renderStructuredSession(data);
   } catch {
     // Keep current view.
   }
+}
+
+function sessionContainsPrompt(session, prompt) {
+  const needle = String(prompt || "").trim();
+  if (!needle) return true;
+  return (session.messages || []).some((message) => {
+    if (message.role !== "user") return false;
+    return (message.content || []).some((block) => block.type === "text" && String(block.text || "").trim() === needle);
+  });
+}
+
+function sessionHasAssistantAnswerAfterPrompt(session, prompt) {
+  const needle = String(prompt || "").trim();
+  let afterPrompt = false;
+  for (const message of session.messages || []) {
+    if (message.role === "user") {
+      afterPrompt = (message.content || []).some((block) => block.type === "text" && String(block.text || "").trim() === needle);
+      continue;
+    }
+    if (!afterPrompt || message.role !== "assistant") continue;
+    const hasAnswer = (message.content || []).some((block) => {
+      return block.type === "text" && Boolean(String(block.text || "").trim());
+    });
+    if (hasAnswer) return true;
+  }
+  return false;
 }
 
 async function loadUtilitySection(section) {
@@ -742,7 +911,7 @@ async function loadSessions() {
     sessions = data.sessions || [];
     const current = sessions.find((item) => item.current);
     if (current) hiddenSessions.delete(current.id);
-    if ((!selectedSessionId || !sessions.some((item) => item.id === selectedSessionId)) && current) {
+    if (current && (pendingPromptText || !selectedSessionId || !sessions.some((item) => item.id === selectedSessionId))) {
       selectedSessionId = current.id;
       selectedSessionTitle = getSessionTitle(current);
       sessionTitle.textContent = selectedSessionTitle;
@@ -785,6 +954,13 @@ function sendPrompt(prompt) {
   thinkingPanel.classList.add("open");
   thinkingState.textContent = "waiting";
   thinkingBody.textContent = "等待 DeepSeek 开始流式思考。";
+  pendingPromptText = text;
+  previousConversationText = `${sessionPlainText(currentSession)}\n${messageList.innerText || ""}`;
+  liveOutputBuffer = "";
+  liveSawPromptEcho = false;
+  messageList.classList.remove("hidden");
+  utilityPanel.classList.add("hidden");
+  rawLogPanel.classList.add("hidden");
   send({ type: "input", data: text });
   setTimeout(() => {
     send({ type: "input", data: "\r" });
@@ -798,6 +974,7 @@ function sendPrompt(prompt) {
     ],
   };
   renderStructuredSession(optimistic);
+  ensureLiveAssistantCard();
   thinkingPanel.classList.add("open");
   thinkingState.textContent = "waiting";
   thinkingBody.textContent = "等待 DeepSeek 开始流式思考。";

@@ -29,6 +29,9 @@ tasks, skills, settings, stats, logs, and raw debug output.
 - `public/style.css` owns the current visual system.
 - The main middle area now defaults to structured conversation cards. The raw
   terminal mirror is kept as a hidden debug view.
+- Composer send now uses an optimistic local message plus a temporary live
+  assistant card sourced from PTY WebSocket output, then swaps to the persisted
+  session answer after DeepSeek writes the final response.
 
 ## Important Product Principle
 
@@ -39,7 +42,8 @@ controls around it.
 ## Next Work
 
 1. Refine main conversation typography and spacing.
-2. Replace delayed session refresh with a stronger event/source-of-truth model.
+2. Replace the remaining polling fallback with a stronger event/source-of-truth
+   model.
 3. Investigate DeepSeek app-server integration for direct message submission.
 4. Harden session actions.
 5. Expand settings/config pages using Hermes WebUI as layout inspiration.

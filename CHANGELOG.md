@@ -2,6 +2,27 @@
 
 ## 0.5.3 - 2026-05-12
 
+### Fixed - 2026-05-13
+
+- Composer submissions now render the user's message immediately before the PTY
+  session file has finished writing.
+- Added a temporary live assistant card fed by WebSocket PTY output, then
+  replace it with the persisted DeepSeek session answer once the final text is
+  available.
+- Pending refresh now follows the backend current session while a prompt is in
+  flight, so fresh sessions no longer wait for manual refresh to show the final
+  answer.
+- Live PTY parsing now waits for the current prompt echo before reading output
+  and filters terminal chrome, prior conversation text, and compressed internal
+  reasoning lines from the visible answer stream.
+
+### Verified - 2026-05-13
+
+- `node --check public/app.js`
+- Browser automation on `http://127.0.0.1:8791/`: new session prompt appears
+  within 300ms, live answer card appears while waiting, and the persisted final
+  `ok` answer replaces the temporary card without page refresh.
+
 ### Changed
 
 - Replaced the default middle terminal mirror with a structured conversation
