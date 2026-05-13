@@ -612,14 +612,11 @@ function appendLiveOutput(text) {
     }
     liveSawPromptEcho = true;
     thinkingState.textContent = "running";
-    chunk = chunk.slice(promptIndex + prompt.length);
-  } else {
-    const promptIndex = chunk.lastIndexOf(prompt);
-    if (promptIndex !== -1) chunk = chunk.slice(promptIndex + prompt.length);
   }
   liveOutputBuffer = `${liveOutputBuffer}\n${chunk}`.slice(-8000);
-  const liveText = extractLiveAnswer(liveOutputBuffer);
-  showLiveAssistant(liveText);
+  showLiveAssistant(currentLang === "zh"
+    ? "DeepSeek 正在生成回答，完成后会自动同步正式内容..."
+    : "DeepSeek is generating. The final answer will sync automatically...");
 }
 
 function extractLiveAnswer(text) {

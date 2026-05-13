@@ -30,6 +30,9 @@
 - Browser automation on `http://127.0.0.1:8791/`: prompt `请只回复 当前问题-*`
   shows `running` state immediately and final answer matches only the current
   prompt, with no older validation prompts mixed in.
+- Browser automation on `http://127.0.0.1:8791/`: live temporary assistant card
+  now shows only generation/sync status, and final content comes from
+  structured `assistant.text` without PTY raw noise.
 
 ### Changed
 
