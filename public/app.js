@@ -725,7 +725,11 @@ function sessionHasAssistantAnswerAfterPrompt(session, prompt) {
   let afterPrompt = false;
   for (const message of session.messages || []) {
     if (message.role === "user") {
-      afterPrompt = (message.content || []).some((block) => block.type === "text" && String(block.text || "").trim() === needle);
+      const blocks = message.content || [];
+      const isPrompt = blocks.some((block) => block.type === "text" && String(block.text || "").trim() === needle);
+      const isToolResult = blocks.length > 0 && blocks.every((block) => block.type === "tool_result");
+      if (isPrompt) afterPrompt = true;
+      else if (!isToolResult) afterPrompt = false;
       continue;
     }
     if (!afterPrompt || message.role !== "assistant") continue;
@@ -943,8 +947,8 @@ function refreshAfterPrompt(attempt = 0) {
   sessionRefreshTimer = setTimeout(async () => {
     await loadSessions();
     if (selectedSessionId) await loadSession(selectedSessionId);
-    if (attempt < 8) refreshAfterPrompt(attempt + 1);
-  }, [500, 900, 1400, 2200, 3200, 4600, 6500, 8500, 11000][attempt] || 12000);
+    if (pendingPromptText && attempt < 120) refreshAfterPrompt(attempt + 1);
+  }, [500, 900, 1400, 2200, 3200, 4600, 6500, 8500, 11000][attempt] || 3000);
 }
 
 async function loadHealth() {

@@ -33,6 +33,9 @@
 - Browser automation on `http://127.0.0.1:8791/`: live temporary assistant card
   now shows only generation/sync status, and final content comes from
   structured `assistant.text` without PTY raw noise.
+- Completion detection now survives DeepSeek tool calls by treating intervening
+  `tool_result` messages as part of the same user turn, so running state clears
+  and final answers sync after tool-assisted responses.
 
 ### Changed
 
