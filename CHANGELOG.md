@@ -36,6 +36,9 @@
 - Completion detection now survives DeepSeek tool calls by treating intervening
   `tool_result` messages as part of the same user turn, so running state clears
   and final answers sync after tool-assisted responses.
+- Session delete/archive from the sidebar now updates the list immediately,
+  switches away from a deleted active session, and no longer re-shows hidden
+  current sessions on refresh.
 
 ### Changed
 

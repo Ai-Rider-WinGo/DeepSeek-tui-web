@@ -908,18 +908,40 @@ async function togglePinSession(item) {
 
 async function archiveSession(item) {
   if (!window.confirm(`删除/归档对话「${getSessionTitle(item)}」？`)) return;
+  closeSessionMenus();
+  setStatus(`Deleting ${item.id.slice(0, 8)}...`);
   hiddenSessions.add(item.id);
+  pinnedSessions.delete(item.id);
   writeHiddenSessions();
+  writePinnedSessions();
+  sessions = sessions.filter((session) => session.id !== item.id);
   if (selectedSessionId === item.id) {
-    selectedSessionId = null;
-    selectedSessionTitle = "Live TUI";
+    const next = sortSessions(sessions).find((session) => !hiddenSessions.has(session.id));
+    selectedSessionId = next?.id || null;
+    selectedSessionTitle = next ? getSessionTitle(next) : "Live TUI";
+    sessionTitle.textContent = selectedSessionTitle;
+    if (next) {
+      await loadSession(next.id);
+    } else {
+      renderStructuredSession({ metadata: {}, messages: [] });
+    }
   }
-  await fetch("/api/session-action", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "archive", id: item.id }),
-  }).catch(() => {});
-  loadSessions();
+  renderSessions();
+  try {
+    const res = await fetch("/api/session-action", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "archive", id: item.id }),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || "Archive failed");
+    setStatus(`Deleted ${item.id.slice(0, 8)}`);
+    await loadSessions();
+  } catch (error) {
+    hiddenSessions.delete(item.id);
+    writeHiddenSessions();
+    setStatus(`Delete failed: ${error.message}`);
+    await loadSessions();
+  }
 }
 
 async function loadSessions() {
@@ -928,12 +950,16 @@ async function loadSessions() {
     const data = await res.json();
     sessions = data.sessions || [];
     const current = sessions.find((item) => item.current);
-    if (current) hiddenSessions.delete(current.id);
     if (current && (pendingPromptText || !selectedSessionId || !sessions.some((item) => item.id === selectedSessionId))) {
-      selectedSessionId = current.id;
-      selectedSessionTitle = getSessionTitle(current);
-      sessionTitle.textContent = selectedSessionTitle;
-      await loadSession(current.id);
+      const next = hiddenSessions.has(current.id)
+        ? sessions.find((item) => !hiddenSessions.has(item.id))
+        : current;
+      if (next) {
+        selectedSessionId = next.id;
+        selectedSessionTitle = getSessionTitle(next);
+        sessionTitle.textContent = selectedSessionTitle;
+        await loadSession(next.id);
+      }
     }
     renderSessions();
   } catch {
